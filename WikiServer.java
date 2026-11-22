@@ -74,7 +74,6 @@ public class WikiServer {
             Files.write(Paths.get(DATA_FILE), sb.toString().getBytes(StandardCharsets.UTF_8));
         } catch (Exception ignored) {}
     }
-
     static void handle(HttpExchange ex) throws IOException {
         String ck = ex.getRequestHeaders().getFirst("Cookie");
         boolean adm = ck != null && ck.contains("wiki_admin=" + ADMIN_PASS);
@@ -175,3 +174,28 @@ public class WikiServer {
 
             h.append("<div class='card'><h4>🖼️ ロゴ・アイコン変更</h4><input type='file' id='lp' accept='image/*'><form id='lf' method='POST'><input type='hidden' name='action' value='upload_logo'><input type='hidden' name='logoData' id='ld'><button type='button' onclick='up()' style='background:#1e90ff;'>ロゴに設定</button></form></div>");
 
+            h.append("<script>");
+            h.append("function up(){const f=document.getElementById('lp').files.item(0);if(!f){alert('画像を選んでね！');return;}const r=new FileReader();r.onload=e=>{document.getElementById('ld').value=e.target.result;document.getElementById('lf').submit();};r.readAsDataURL(f);}");
+            h.append("function insImg(){const f=document.getElementById('ip').files.item(0);if(!f){alert('写真を選んでね！');return;}const r=new FileReader();r.onload=async e=>{const res=await fetch('/',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'action=upload_img&imgData='+encodeURIComponent(e.target.result)});const fn=await res.text();document.getElementById('ct').value+='\\n[img:'+fn+']\\n';alert('写真を本文に挿入したぜ！最後にセーブを押してな！');};r.readAsDataURL(f);}");
+            h.append("</script>");
+
+            h.append("<form method='POST'><input type='hidden' name='action' value='logout'><button style='background:#333;'>🔓 ログアウト</button></form>");
+        } else {
+            h.append("<div class='card'><h4>🔒 管理者ログイン</h4><form method='POST'><input type='hidden' name='action' value='login'><input type='password' name='password' placeholder='パスワード' required><button>ログイン</button></form></div>");
+        }
+        byte[] out = h.append("</body></html>").toString().getBytes(StandardCharsets.UTF_8);
+        ex.getResponseHeaders().set("Content-Type", "text/html; charset=UTF-8");
+        ex.sendResponseHeaders(200, out.length);
+        try (OutputStream os = ex.getResponseBody()) { os.write(out); }
+    }
+
+    static String fmt(String s) {
+        s = esc(s).replaceAll("\\[img:(img_\\d+\\.png)\\]", "<img src='/images/$1'>");
+        s = s.replaceAll("https?://scratch\\.mit\\.edu/projects/(\\d+)[^\\s<]*", "<iframe src='https://mit.edu' allowfullscreen></iframe>");
+        return s.replaceAll("(https?://[^\\s<]+\\.(?:png|jpg|jpeg|gif|webp))", "<img src='$1'>").replace("\n", "<br>");
+    }
+
+    static String esc(String s) {
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;");
+    }
+}
