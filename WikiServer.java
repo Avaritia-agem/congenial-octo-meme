@@ -25,7 +25,7 @@ public class WikiServer {
         s.createContext("/logo.png", WikiServer::logo);
         s.createContext("/images/", WikiServer::serveImg);
         s.start();
-        System.out.println("Wikiサーバー起動完了（記事への写真アップロード対応版）！");
+        System.out.println("Wikiサーバー起動完了！");
     }
 
     static void logo(HttpExchange ex) throws IOException {
@@ -53,8 +53,12 @@ public class WikiServer {
     static void load() {
         try {
             for (String l : Files.readAllLines(Paths.get(DATA_FILE))) {
-                String[] p = l.split(":", 2);
-                if (p.length == 2) pages.put(new String(Base64.getDecoder().decode(p), StandardCharsets.UTF_8), new String(Base64.getDecoder().decode(p), StandardCharsets.UTF_8));
+                List<String> p = Arrays.asList(l.split(":", 2));
+                if (p.size() == 2) {
+                    String k = new String(Base64.getDecoder().decode(p.get(0)), StandardCharsets.UTF_8);
+                    String v = new String(Base64.getDecoder().decode(p.get(1)), StandardCharsets.UTF_8);
+                    pages.put(k, v);
+                }
             }
         } catch (Exception ignored) {}
     }
@@ -62,7 +66,11 @@ public class WikiServer {
     static synchronized void save() {
         try {
             StringBuilder sb = new StringBuilder();
-            for (var e : pages.entrySet()) sb.append(Base64.getEncoder().encodeToString(e.getKey().getBytes(StandardCharsets.UTF_8))).append(":").append(Base64.getEncoder().encodeToString(e.getValue().getBytes(StandardCharsets.UTF_8))).append("\n");
+            for (var e : pages.entrySet()) {
+                String k = Base64.getEncoder().encodeToString(e.getKey().getBytes(StandardCharsets.UTF_8));
+                String v = Base64.getEncoder().encodeToString(e.getValue().getBytes(StandardCharsets.UTF_8));
+                sb.append(k).append(":").append(v).append("\n");
+            }
             Files.write(Paths.get(DATA_FILE), sb.toString().getBytes(StandardCharsets.UTF_8));
         } catch (Exception ignored) {}
     }
@@ -73,21 +81,29 @@ public class WikiServer {
         if ("POST".equalsIgnoreCase(ex.getRequestMethod())) {
             String f = new BufferedReader(new InputStreamReader(ex.getRequestBody(), StandardCharsets.UTF_8)).readLine();
             Map<String, String> pm = new HashMap<>();
-            if (f != null) for (String s : f.split("&")) {
-                String[] kv = s.split("=", 2);
-                if (kv.length == 2) pm.put(URLDecoder.decode(kv, StandardCharsets.UTF_8), URLDecoder.decode(kv, StandardCharsets.UTF_8));
+            if (f != null) {
+                for (String s : f.split("&")) {
+                    List<String> kv = Arrays.asList(s.split("=", 2));
+                    if (kv.size() == 2) {
+                        pm.put(URLDecoder.decode(kv.get(0), StandardCharsets.UTF_8), URLDecoder.decode(kv.get(1), StandardCharsets.UTF_8));
+                    }
+                }
             }
             String act = pm.getOrDefault("action", "");
-            if ("login".equals(act) && ADMIN_PASS.equals(pm.get("password"))) ex.getResponseHeaders().add("Set-Cookie", "wiki_admin=" + ADMIN_PASS + "; Path=/");
-            if ("logout".equals(act)) ex.getResponseHeaders().add("Set-Cookie", "wiki_admin=; Path=/; Max-Age=0");
+            if ("login".equals(act) && ADMIN_PASS.equals(pm.get("password"))) {
+                ex.getResponseHeaders().add("Set-Cookie", "wiki_admin=" + ADMIN_PASS + "; Path=/");
+            }
+            if ("logout".equals(act)) {
+                ex.getResponseHeaders().add("Set-Cookie", "wiki_admin=; Path=/; Max-Age=0");
+            }
             if (adm && "upload_logo".equals(act)) {
                 String d = pm.getOrDefault("logoData", "");
-                if (d.contains(",")) d = d.split(",", 2);
+                if (d.contains(",")) d = d.substring(d.indexOf(",") + 1);
                 if (!d.isEmpty()) Files.write(Paths.get(LOGO_FILE), Base64.getDecoder().decode(d));
             }
             if (adm && "upload_img".equals(act)) {
                 String d = pm.getOrDefault("imgData", "");
-                if (d.contains(",")) d = d.split(",", 2);
+                if (d.contains(",")) d = d.substring(d.indexOf(",") + 1);
                 String fname = "img_" + System.currentTimeMillis() + ".png";
                 if (!d.isEmpty()) Files.write(Paths.get(IMG_DIR, fname), Base64.getDecoder().decode(d));
                 byte[] res = fname.getBytes(StandardCharsets.UTF_8);
@@ -107,30 +123,55 @@ public class WikiServer {
             ex.sendResponseHeaders(302, -1);
             return;
         }
-        String cur = "トップページ"; boolean ed = false;
-        if (ex.getRequestURI().getQuery() != null) for (String q : ex.getRequestURI().getQuery().split("&")) {
-            if (q.startsWith("page=")) cur = URLDecoder.decode(q.substring(5), StandardCharsets.UTF_8);
-            if ("edit=1".equals(q)) ed = true;
+        String cur = "トップページ";
+        boolean ed = false;
+        if (ex.getRequestURI().getQuery() != null) {
+            for (String q : ex.getRequestURI().getQuery().split("&")) {
+                if (q.startsWith("page=")) cur = URLDecoder.decode(q.substring(5), StandardCharsets.UTF_8);
+                if ("edit=1".equals(q)) ed = true;
+            }
         }
         String body = pages.getOrDefault(cur, "ページが存在しません");
         boolean hl = Files.exists(Paths.get(LOGO_FILE));
-        StringBuilder h = new StringBuilder("<!DOCTYPE html><html lang=ja><head><meta charset=UTF-8><meta name=viewport content=width=device-width,initial-scale=1>");
-        if (hl) h.append("<link rel=icon href=/logo.png><link rel=apple-touch-icon href=/logo.png>");
-        h.append("<title>Undertale Scratch AU Wiki</title><style>body{font-family:sans-serif;margin:15px;background:#000;color:#eee}.card{background:#141414;padding:15px;border:2px solid #fff;margin-bottom:15px}input,textarea{width:100%;box-sizing:border-box;margin-bottom:10px;padding:10px;background:#222;color:#fff;border:1px solid #777}button{background:#ff4757;color:#fff;border:none;padding:10px;font-weight:bold;width:100%;margin-bottom:6px}a{color:#ffdd59;text-decoration:none;margin-right:10px}img{max-width:100%;display:block;margin:10px auto;border-radius:4px}iframe{width:100%;height:300px;border:none;margin:10px 0}</style></head><body>");
-        h.append(hl ? "<a href=/><img src=/logo.png?t=" + System.currentTimeMillis() + " style=max-height:110px></a>" : "<h2>❤️ Undertale Scratch AU Wiki</h2>");
-        h.append("<div class=card><strong>📚 AU一覧:</strong><br><br>");
-        for (String t : pages.keySet()) h.append("<a href=/?page=").append(URLEncoder.encode(t, StandardCharsets.UTF_8)).append(">★ ").append(esc(t)).append("</a> ");
-        h.append("</div><div class=card><h3>").append(esc(cur)).append("</h3><div>").append(fmt(body)).append("</div>");
-        if (adm && pages.containsKey(cur)) {
-            h.append("<hr><a href=/?page=").append(URLEncoder.encode(cur, StandardCharsets.UTF_8)).append("&edit=1 style=width:100%><button type=button style=background:#ffa502;color:#000>✏️ 編集する</button></a>");
-            if (!"トップページ".equals(cur)) h.append("<form method=POST><input type=hidden name=action value=delete><input type=hidden name=target value='").append(esc(cur)).append("'><button style=background:#57606f>🗑️ 削除する</button></form>");
+        StringBuilder h = new StringBuilder("<!DOCTYPE html><html lang='ja'><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'>");
+        if (hl) h.append("<link rel='icon' href='/logo.png'><link rel='apple-touch-icon' href='/logo.png'>");
+        h.append("<title>Undertale Scratch AU Wiki</title><style>");
+        h.append("body{font-family:sans-serif;margin:15px;background:#000;color:#eee;}");
+        h.append(".card{background:#141414;padding:15px;border:2px solid #fff;margin-bottom:15px;}");
+        h.append("input,textarea{width:100%;box-sizing:border-box;margin-bottom:10px;padding:10px;background:#222;color:#fff;border:1px solid #777;}");
+        h.append("button{background:#ff4757;color:#fff;border:none;padding:10px;font-weight:bold;width:100%;margin-bottom:6px;cursor:pointer;}");
+        h.append("a{color:#ffdd59;text-decoration:none;margin-right:10px;}");
+        h.append("img{max-width:100%;display:block;margin:10px auto;border-radius:4px;}");
+        h.append("iframe{width:100%;height:300px;border:none;margin:10px 0;}");
+        h.append("</style></head><body>");
+
+        if (hl) {
+            h.append("<a href='/'><img src='/logo.png?t=").append(System.currentTimeMillis()).append("' style='max-height:110px;'></a>");
+        } else {
+            h.append("<h2>❤️ Undertale Scratch AU Wiki</h2>");
+        }
+
+        h.append("<div class='card'><strong>📚 AU一覧:</strong><br><br>");
+        for (String t : pages.keySet()) {
+            h.append("<a href='/?page=").append(URLEncoder.encode(t, StandardCharsets.UTF_8)).append("'>★ ").append(esc(t)).append("</a> ");
         }
         h.append("</div>");
+
+        h.append("<div class='card'><h3>").append(esc(cur)).append("</h3><div>").append(fmt(body)).append("</div>");
+        if (adm && pages.containsKey(cur)) {
+            h.append("<hr><a href='/?page=").append(URLEncoder.encode(cur, StandardCharsets.UTF_8)).append("&edit=1' style='display:block;width:100%;'><button type='button' style='background:#ffa502;color:#000;'>✏️ 編集する</button></a>");
+            if (!"トップページ".equals(cur)) {
+                h.append("<form method='POST'><input type='hidden' name='action' value='delete'><input type='hidden' name='target' value='").append(esc(cur)).append("'><button style='background:#57606f;'>🗑️ 削除する</button></form>");
+            }
+        }
+        h.append("</div>");
+
         if (adm) {
-            h.append("<div class=card><h4>").append(ed ? "✏️ 編集中" : "➕ 新規記事").append("</h4><form method=POST><input type=hidden name=action value=save><input name=title value='").append(esc(ed ? cur : "")).append("' placeholder=AU名 required><textarea id=ct name=content rows=6 placeholder=本文 required>").append(esc(ed ? body : "")).append("</textarea>");
-            h.append("<div style='background:#222;padding:10px;margin-bottom:10px;border:1px dashed #777'><strong>📷 記事に写真を挿入:</strong><input type=file id=ip accept=image/* style=margin-top:6px><button type=button onclick=insImg() style=background:#2ed573;color:#000>選んだ写真を本文に追加</button></div>");
+            h.append("<div class='card'><h4>").append(ed ? "✏️ 編集中" : "➕ 新規記事").append("</h4><form method='POST'><input type='hidden' name='action' value='save'>");
+            h.append("<input name='title' value='").append(esc(ed ? cur : "")).append("' placeholder='AU名' required>");
+            h.append("<textarea id='ct' name='content' rows='6' placeholder='本文' required>").append(esc(ed ? body : "")).append("</textarea>");
+            h.append("<div style='background:#222;padding:10px;margin-bottom:10px;border:1px dashed #777;'><strong>📷 記事に写真を挿入:</strong><input type='file' id='ip' accept='image/*' style='margin-top:6px;'><button type='button' onclick='insImg()' style='background:#2ed573;color:#000;'>選んだ写真を本文に追加</button></div>");
             h.append("<button>セーブ</button></form></div>");
-            h.append("<div class=card><h4>🖼️ ロゴ・アイコン変更</h4><input type=file id=lp accept=image/*><form id=lf method=POST><input type=hidden name=action value=upload_logo><input type=hidden name=logoData id=ld><button type=button onclick=up() style=background:#1e90ff>ロゴに設定</button></form></div>");
-            h.append("<script>function up(){const f=document.getElementById('lp').files;if(!f)return;const r=new FileReader();r.onload=e=>{document.getElementById('ld').value=e.target.result;document.getElementById('lf').submit()};r.readAsDataURL(f)}function insImg(){const f=document.getElementById('ip').files;if(!f){alert('写真を選んでね！');return;}const r=new FileReader();r.onload=async e=>{const res=await fetch('/',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'action=upload_img&imgData='+encodeURIComponent(e.target.result)});const fn=await res.text();document.getElementById('ct').value+='\\n[img:'+fn+']\\n';alert('写真を本文に挿入したぜ！最後にセーブを押してな！');};r.readAsDataURL(f)}</script>");
-            h.append("<form method=POST><input type=hidden name=action value=logout><button style=background:#333>🔓 ログアウト</button></form>");
-        } else {
+
+            h.append("<div class='card'><h4>🖼️ ロゴ・アイコン変更</h4><input type='file' id='lp' accept='image/*'><form id='lf' method='POST'><input type='hidden' name='action' value='upload_logo'><input type='hidden' name='logoData' id='ld'><button type='button' onclick='up()' style='background:#1e90ff;'>ロゴに設定</button></form></div>");
+
