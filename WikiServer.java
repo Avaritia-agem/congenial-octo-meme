@@ -134,18 +134,3 @@ public class WikiServer {
             h.append("<script>function up(){const f=document.getElementById('lp').files;if(!f)return;const r=new FileReader();r.onload=e=>{document.getElementById('ld').value=e.target.result;document.getElementById('lf').submit()};r.readAsDataURL(f)}function insImg(){const f=document.getElementById('ip').files;if(!f){alert('写真を選んでね！');return;}const r=new FileReader();r.onload=async e=>{const res=await fetch('/',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'action=upload_img&imgData='+encodeURIComponent(e.target.result)});const fn=await res.text();document.getElementById('ct').value+='\\n[img:'+fn+']\\n';alert('写真を本文に挿入したぜ！最後にセーブを押してな！');};r.readAsDataURL(f)}</script>");
             h.append("<form method=POST><input type=hidden name=action value=logout><button style=background:#333>🔓 ログアウト</button></form>");
         } else {
-h.append("🔒 管理者ログインログイン");
-}
-byte[] out = h.append("").toString().getBytes(StandardCharsets.UTF_8);
-ex.getResponseHeaders().set("Content-Type", "text/html; charset=UTF-8");
-ex.sendResponseHeaders(200, out.length);
-try (OutputStream os = ex.getResponseBody()) { os.write(out); }
-}
-static String fmt(String s) {
-s = esc(s).replaceAll("\[img:(img_\d+\.png)\]", "");
-s = s.replaceAll("https?://scratch\.mit\.edu/projects/(\d+)[^\s<]*", "");
-return s.replaceAll("(https?://[^\s<]+\.(?:png|jpg|jpeg|gif|webp))", "").replace("\n", "
-");
-}
-static String esc(String s) { return s.replace("&", "&").replace("<", "<").replace(">", ">").replace(""", """); }
-}
